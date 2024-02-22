@@ -302,7 +302,7 @@ int FTPClient::progressCallback(void *p, double dltotal, double dlnow, double ul
         break;
     }
 
-//    std::cout << "process: " << fileInfo->transferProgress << "%" << fileInfo->filename << std::endl;
+    std::cout << "process: " << fileInfo->transferProgress << "% " << fileInfo->filename << std::endl;
 
     return 0;
 }
@@ -384,9 +384,9 @@ bool FTPClient::downloadFile(const std::string &remoteFilePath, const std::strin
     }
 
     // 判断是否已经下载文件
-//    if (isDownloaded(sanitizedLocalPath)) {
-//        return true;
-//    }
+    if (isDownloaded(sanitizedLocalPath)) {
+        return true;
+    }
 
 
     CURL* curl_download = curl_easy_init();
@@ -493,7 +493,6 @@ bool FTPClient::concurrentDownloadFolder(const std::string& remoteFolderPath, co
 
     std::vector<std::string> fileNames = listRemoteFiles(sanitizedRemotePath);
     std::vector<std::future<bool>> futures;
-    std::vector<std::thread> threads;
     for (const std::string& fileName : fileNames) {
         std::string remoteFilePath = sanitizedRemotePath + "/" + fileName;
         std::string localFilePath = sanitizedLocalPath + "/" + fileName;
