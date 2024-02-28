@@ -24,6 +24,9 @@ This FTP client is implemented using libcurl and provides functionality for down
 ```
 4. Create an instance of the FTP client and start using its functions to interact with the FTP server:
 ```cpp
+
+std::vector<std::string> filterKeywords;
+filterKeywords << "temp";
 // Create an FTP client object
 FTPClient ftpClient("ftp.example.com", "username", "password");
 
@@ -31,13 +34,13 @@ FTPClient ftpClient("ftp.example.com", "username", "password");
 ftpClient.enableDeleteAfterDownload_=true;
 
 // Download a file from the server with keyword matching
-ftpClient.downloadFile("remote_file.txt", "local_file.txt", "keyword");
+ftpClient.downloadFile("remote_file.txt", "local_file.txt", filterKeywords);
 
 // Download an entire directory from the server with keyword matching
-ftpClient.downloadFolder("remote_directory", "local_directory", "keyword");
+ftpClient.downloadFolder("remote_directory", "local_directory", filterKeywords);
 
 // Concurrently download an entire directory from the server with keyword matching
-ftpClient.concurrentDownloadFolder("remote_directory", "local_directory", "keyword");
+ftpClient.concurrentDownloadFolder("remote_directory", "local_directory", filterKeywords);
 
 // Upload a file to the server
 ftpClient.uploadFile("local_file.txt", "remote_file.txt");
