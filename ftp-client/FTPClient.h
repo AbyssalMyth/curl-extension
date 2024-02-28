@@ -8,6 +8,10 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <vector>
+#include <mutex>
+#include <map>
+#include <condition_variable>
+
 #include <curl/curl.h>
 
 /**
@@ -16,6 +20,27 @@
 class FTPClient
 {
 public:
+
+    enum FTP_Code {
+        FTP_FAILED = 0,
+        FTP_OK = 1,
+        INITIALIZATION_FAILED,              /* 1 - 初始化网络失败 */
+        LOCAL_FILE_OPEN_FAILED,             /*  - 本地文件打开失败 */
+        CREATE_FOLDER_FAILED,               /*  - 创建文件夹失败 */
+        FILENAME_CONTAINS_KEYWORD,          /*  - 文件名中包含关键词，忽略下载此文件 */
+        REMOTE_AND_LOCAL_FILE_IDENTICAL,    /* - 远程与本地文件大小一致，不传输。仅上传 */
+        REMOTE_FILE_DELE_FAILED             /* - 删除远端文件失败,文件已下载成功 */
+    };
+
+    struct FTPFileInfo {
+        std::string permissions;    // 文件权限
+        std::string userGroup;      // 用户组
+        std::string userName;       // 用户名
+        int fileSize;               // 文件大小
+        std::string date;           // 日期
+        std::string fileName;       // 文件名
+        std::string path;           // 路径
+    };
 
     enum TransferType {
         Upload,
@@ -30,8 +55,6 @@ public:
         double transferProgress;   // 传输进度
         TransferType transferType; // 传输类型（上传或下载）
     };
-
-
 
 public:
     /**
@@ -75,7 +98,7 @@ public:
      * @param curl CURL对象
      * @param remoteFilePath 远程文件路径
      */
-    void deleteRemoteFile(CURL* curl, const std::string& remoteFilePath);
+    bool deleteRemoteFile(CURL* curl, const std::string& remoteFilePath);
 
     /**
      * @brief 创建本地文件夹
@@ -96,7 +119,7 @@ public:
      * @param remoteFolderPath 远程文件夹路径
      * @return 返回文件列表
      */
-    std::vector<std::string> listRemoteFiles(const std::string& remoteFolderPath);
+    std::vector<FTPFileInfo> listRemoteFiles(const std::string& remoteFolderPath);
 
     /**
      * @brief 列出本地指定文件夹下的文件列表
@@ -106,39 +129,45 @@ public:
     std::vector<std::string> listLocalFiles(const std::string& localFolderPath);
 
     /**
+     * @brief 获取传输正在传输文件信息
+     * @return 传输文件信息
+     */
+    std::map<int, FileTransferInfo>* getFileTransferInfoAddr();
+
+    /**
      * @brief 下载文件到本地
      * @param remoteFilePath 远程文件路径
      * @param localFilePath 本地文件路径
-     * @param keyword 匹配关键字，如果文件内容中包含该关键字，则记录为已下载
-     * @return 下载成功则返回true，否则返回false
+     * @param filterKeywords 过滤条件列表，当下载文件名包含关键词时不下载
+     * @return 返回状态号
      */
-    bool downloadFile(const std::string &remoteFilePath, const std::string &localFilePath, const std::string& keyword);
+    FTP_Code downloadFile(const std::string &remoteFilePath, const std::string &localFilePath, const std::vector<std::string>& filterKeywords);
 
     /**
      * @brief 下载整个FTP服务器文件夹到本地
      * @param remoteFolderPath 远程文件夹路径
      * @param localFolderPath 本地文件夹路径
-     * @param keyword 匹配关键字，如果文件内容中包含该关键字，则记录为已下载
+     * @param filterKeywords 过滤条件列表，当下载文件名包含关键词时不下载
      * @return 下载成功则返回true，否则返回false
      */
-    bool downloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, const std::string& keyword);
+    bool downloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, std::vector<std::string>& filterKeywords);
 
     /**
      * @brief 并发下载整个FTP服务器文件夹到本地
      * @param remoteFolderPath 远程文件夹路径
      * @param localFolderPath 本地文件夹路径
-     * @param keyword 匹配关键字，如果文件内容中包含该关键字，则记录为已下载
+     * @param filterKeywords 过滤条件列表，当下载文件名包含关键词时不下载
      * @return 下载成功则返回true，否则返回false
      */
-    bool concurrentDownloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, const std::string& keyword);
+    bool concurrentDownloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, const std::vector<std::string>& filterKeywords);
 
     /**
      * @brief 上传文件到FTP服务器
      * @param localFilePath 本地文件路径
      * @param remoteFilePath 远程文件路径
-     * @return 上传成功则返回true，否则返回false
+     * @return 返回状态号
      */
-    bool uploadFile(const std::string& localFilePath, const std::string& remoteFilePath);
+    FTP_Code uploadFile(const std::string& localFilePath, const std::string& remoteFilePath);
 
     /**
      * @brief 下载整个FTP服务器文件夹到本地
@@ -217,7 +246,7 @@ private:
      * @param localFilePath 本地文件路径
      * @param keyword 匹配关键字，如果文件内容中包含该关键字，则记录为已下载
      */
-    void recordDownloadedFile(const std::string& localFilePath, const std::string& keyword);
+    void recordDownloadedFile(const std::string& localFilePath);
 
     /**
      * @brief 判断文件是否已下载
@@ -254,11 +283,14 @@ private:
      */
     std::string replaceSpacesWithPercent20(const std::string& str);
 
-
 private:
     std::string host_;  ///< FTP服务器主机名
     std::string username_;  ///< FTP登录用户名
     std::string password_;  ///< FTP登录密码
+
+
+    std::mutex mutex;
+    std::map<int, FileTransferInfo> taskProgress;
 };
 
 #endif  // FTPCLIENT_H
