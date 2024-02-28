@@ -22,22 +22,26 @@ FTPClient::FTPClient(const std::string& host, const std::string& username, const
 
 }
 
-FTPClient::~FTPClient() {
+FTPClient::~FTPClient()
+{
     curl_global_cleanup();
 }
 
-size_t FTPClient::writeCallback(void* contents, size_t size, size_t nmemb, std::ofstream* file) {
+size_t FTPClient::writeCallback(void* contents, size_t size, size_t nmemb, std::ofstream* file)
+{
     size_t dataSize = size * nmemb;
     file->write((char*)contents, dataSize);
     return dataSize;
 }
 
-size_t FTPClient::readCallback(void* buffer, size_t size, size_t nmemb, std::ifstream* file) {
+size_t FTPClient::readCallback(void* buffer, size_t size, size_t nmemb, std::ifstream* file)
+{
     file->read((char*)buffer, size * nmemb);
     return file->gcount();
 }
 
-bool FTPClient::resumeEnabled(CURL* curl, const std::string& remoteFilePath) {
+bool FTPClient::resumeEnabled(CURL* curl, const std::string& remoteFilePath)
+{
     std::stringstream command;
     command << "SIZE " << remoteFilePath;
 
@@ -60,7 +64,8 @@ bool FTPClient::resumeEnabled(CURL* curl, const std::string& remoteFilePath) {
     return false;
 }
 
-off_t FTPClient::getLocalFileSize(const std::string& localFilePath) {
+off_t FTPClient::getLocalFileSize(const std::string& localFilePath)
+{
     std::ifstream file(localFilePath, std::ios::in | std::ios::binary);
     if (!file) {
         return 0;
@@ -74,7 +79,8 @@ off_t FTPClient::getLocalFileSize(const std::string& localFilePath) {
     return position;
 }
 
-off_t FTPClient::getRemoteFileSize(CURL* curl, const std::string& remoteFilePath) {
+off_t FTPClient::getRemoteFileSize(CURL* curl, const std::string& remoteFilePath)
+{
     // 设置远程路径和URL
     std::stringstream str;
     curl_easy_setopt(curl, CURLOPT_URL, ("ftp://" + host_ + remoteFilePath).c_str());
@@ -97,7 +103,8 @@ off_t FTPClient::getRemoteFileSize(CURL* curl, const std::string& remoteFilePath
 }
 
 
-void FTPClient::deleteRemoteFile(CURL* curl, const std::string& remoteFilePath) {
+bool FTPClient::deleteRemoteFile(CURL* curl, const std::string& remoteFilePath)
+{
 
     std::stringstream command;
     command << "DELE " << remoteFilePath;
@@ -112,10 +119,14 @@ void FTPClient::deleteRemoteFile(CURL* curl, const std::string& remoteFilePath) 
 
     if (result != CURLE_OK) {
         std::cerr << "Failed to delete remote file: " << remoteFilePath << std::endl;
+        return false;
     }
+
+    return true;
 }
 
-bool FTPClient::createLocalFolder(const std::string& localFolderPath) {
+bool FTPClient::createLocalFolder(const std::string& localFolderPath)
+{
 #if defined(_WIN32)
     std::wstring wFolderPath = std::wstring(localFolderPath.begin(), localFolderPath.end());
     if (CreateDirectoryW(wFolderPath.c_str(), NULL) || GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -180,11 +191,12 @@ bool FTPClient::createRemoteDirectory(const std::string &remoteDirectoryPath)
     return true;
 }
 
-std::vector<std::string> FTPClient::listRemoteFiles(const std::string& remoteFolderPath) {
+std::vector<FTPClient::FTPFileInfo> FTPClient::listRemoteFiles(const std::string& remoteFolderPath)
+{
     std::string strcomm = replaceSpacesWithPercent20(remoteFolderPath);
     strcomm = "/" + strcomm;
 
-    std::vector<std::string> fileList;
+    std::vector<FTPFileInfo> fileList;
     CURL* curl = curl_easy_init();
     if (!curl) {
         return fileList;
@@ -232,8 +244,15 @@ std::vector<std::string> FTPClient::listRemoteFiles(const std::string& remoteFol
                     fileList.insert(fileList.end(), subFileList.begin(), subFileList.end());
                 }
             }else if(tokens.size() >= 9 && tokens[0][0] == '-'){
-                std::string modTime = tokens[5] + " " + tokens[6];
-                fileList.push_back(remoteFolderPath + fileOrDirectoryName);
+                FTPFileInfo file;
+                file.permissions = tokens[0];
+                file.userName = tokens[2];
+                file.userGroup = tokens[3];
+                file.fileSize = std::stol(tokens[4]);
+                file.date = tokens[5] + "-" + tokens[6] + " " + tokens[7];
+                file.path = "/" + remoteFolderPath;
+                file.fileName = fileOrDirectoryName;
+                fileList.push_back(file);
             }
         }
     } else {
@@ -247,7 +266,8 @@ std::vector<std::string> FTPClient::listLocalFiles(const std::string &localFolde
 {
     std::vector<std::string> fileList;
     // 遍历文件夹内的文件和子文件夹
-    for (const auto& entry : std::experimental::filesystem::directory_iterator(localFolderPath)) {
+    for (const auto& entry : std::experimental::filesystem::directory_iterator(localFolderPath))
+    {
         std::experimental::filesystem::file_status status = entry.status();
         if (std::experimental::filesystem::is_directory(status)) {
             const auto& subFileList = listLocalFiles(entry.path().string());
@@ -259,7 +279,14 @@ std::vector<std::string> FTPClient::listLocalFiles(const std::string &localFolde
     return fileList;
 }
 
-size_t FTPClient::writeToStringStreamCallback(void* contents, size_t size, size_t nmemb, std::stringstream* stream) {
+std::map<int, FTPClient::FileTransferInfo> *FTPClient::getFileTransferInfoAddr()
+{
+    std::cout << &taskProgress << std::endl;
+    return &taskProgress;
+}
+
+size_t FTPClient::writeToStringStreamCallback(void* contents, size_t size, size_t nmemb, std::stringstream* stream)
+{
     size_t dataSize = size * nmemb;
     stream->write((char*)contents, dataSize);
     return dataSize;
@@ -302,15 +329,16 @@ int FTPClient::progressCallback(void *p, double dltotal, double dlnow, double ul
         break;
     }
 
-    std::cout << "process: " << fileInfo->transferProgress << "% " << fileInfo->filename << std::endl;
+//    std::cout << "process: " << fileInfo->transferProgress << "%" << fileInfo->filename << std::endl;
 
     return 0;
 }
 
-void FTPClient::recordDownloadedFile(const std::string& localFilePath, const std::string& keyword) {
+void FTPClient::recordDownloadedFile(const std::string& localFilePath)
+{
 
     std::ofstream recordFile("downloaded_files.txt", std::ios::app);
-    recordFile << keyword << " : " << localFilePath << std::endl;
+    recordFile << localFilePath << std::endl;
     recordFile.close();
 }
 
@@ -319,7 +347,8 @@ bool FTPClient::isDownloaded(const std::string& keyword) {
     return isKeywordMatched("downloaded_files.txt", keyword);
 }
 
-bool FTPClient::isKeywordMatched(const std::string& filePath, const std::string& keyword) {
+bool FTPClient::isKeywordMatched(const std::string& filePath, const std::string& keyword)
+{
     if (keyword.empty()) {
         return false;
     }
@@ -342,7 +371,8 @@ bool FTPClient::isKeywordMatched(const std::string& filePath, const std::string&
     return false;
 }
 
-bool FTPClient::fileExists(const std::string &filePath){
+bool FTPClient::fileExists(const std::string &filePath)
+{
     std::ifstream file(filePath);
     return file.good();
 }
@@ -370,7 +400,9 @@ std::string FTPClient::replaceSpacesWithPercent20(const std::string &str)
 }
 
 // 实现下载文件的函数
-bool FTPClient::downloadFile(const std::string &remoteFilePath, const std::string &localFilePath, const std::string& keyword) {
+FTPClient::FTP_Code FTPClient::downloadFile(const std::string &remoteFilePath, const std::string &localFilePath,
+                                            const std::vector<std::string> &filterKeywords)
+{
 
     std::string sanitizedRemotePath = remoteFilePath;
     std::string sanitizedLocalPath = localFilePath;
@@ -383,28 +415,29 @@ bool FTPClient::downloadFile(const std::string &remoteFilePath, const std::strin
         sanitizedRemotePath.insert(0, "/");
     }
 
-    // 判断是否已经下载文件
-    if (isDownloaded(sanitizedLocalPath)) {
-        return true;
-    }
-
-
-    CURL* curl_download = curl_easy_init();
-    if (!curl_download) {
-        return false;
-    }
-
-    curl_easy_setopt(curl_download, CURLOPT_USERNAME, username_.c_str());
-    curl_easy_setopt(curl_download, CURLOPT_PASSWORD, password_.c_str());
-
     // 将本地路径拆分为目录和文件名
     size_t separatorIndex = sanitizedLocalPath.find_last_of('/');
     std::string loacalDirectoryPath = sanitizedLocalPath.substr(0, separatorIndex);
     std::string loacalFileName = sanitizedLocalPath.substr(separatorIndex + 1);
 
-    if (!createLocalFolder(loacalDirectoryPath)) {
-        return false;
+    // 过滤关键词
+    for (const std::string& keyword : filterKeywords) {
+        if (loacalFileName.find(keyword) != std::string::npos) {
+            return FILENAME_CONTAINS_KEYWORD;
+        }
     }
+
+    if (!createLocalFolder(loacalDirectoryPath)) {
+        return CREATE_FOLDER_FAILED;
+    }
+
+    CURL* curl_download = curl_easy_init();
+    if (!curl_download) {
+        return INITIALIZATION_FAILED;
+    }
+
+    curl_easy_setopt(curl_download, CURLOPT_USERNAME, username_.c_str());
+    curl_easy_setopt(curl_download, CURLOPT_PASSWORD, password_.c_str());
 
     std::ofstream file;
     bool isResumeEnabled = resumeEnabled(curl_download, sanitizedRemotePath);
@@ -415,8 +448,9 @@ bool FTPClient::downloadFile(const std::string &remoteFilePath, const std::strin
     }
 
     if (!file.is_open()) {
+        curl_easy_cleanup(curl_download);
         std::cerr << "Failed to open local file: " << sanitizedLocalPath << std::endl;
-        return false;
+        return LOCAL_FILE_OPEN_FAILED;
     }
 
     // 定位到文件末尾，准备追加数据
@@ -430,36 +464,52 @@ bool FTPClient::downloadFile(const std::string &remoteFilePath, const std::strin
 
     // 设置CURLOPT_NOPROGRESS为0，以启用进度回调函数
     // 设置CURLOPT_PROGRESSFUNCTION为progressCallback函数指针，用于获取上传进度
-    FileTransferInfo fileInfo;
-    fileInfo.filename = sanitizedRemotePath;
-    fileInfo.transferType = Download;
 
-    curl_easy_setopt(curl_download, CURLOPT_PROGRESSDATA, &fileInfo);
-    curl_easy_setopt(curl_download,CURLOPT_PROGRESSFUNCTION , progressCallback);
-    curl_easy_setopt(curl_download,CURLOPT_NOPROGRESS , 0L);
+    long proKey = taskProgress.size();
+    do{
+        std::lock_guard<std::mutex> lock(mutex);
+        proKey = taskProgress.size();
+        taskProgress[proKey] = FileTransferInfo();
+    }while(false);
+
+    taskProgress[proKey].filename = sanitizedRemotePath;
+    taskProgress[proKey].transferType = Download;
+
+    curl_easy_setopt(curl_download,CURLOPT_PROGRESSDATA, &taskProgress[proKey]);
+    curl_easy_setopt(curl_download,CURLOPT_PROGRESSFUNCTION, progressCallback);
+    curl_easy_setopt(curl_download,CURLOPT_NOPROGRESS, 0L);
 
     CURLcode result = curl_easy_perform(curl_download);
-
     file.close();
 
-    bool res = false;
+    FTP_Code res = FTP_FAILED;
     if (result == CURLE_OK) {
+        res = FTP_OK;
         std::cout << "File downloaded successfully!" << std::endl;
         if (enableDeleteAfterDownload_) {
-            deleteRemoteFile(curl_download, sanitizedRemotePath);
+            if(!deleteRemoteFile(curl_download, sanitizedRemotePath))
+                res = REMOTE_FILE_DELE_FAILED;
         }
-        recordDownloadedFile(sanitizedLocalPath, keyword);
-        res = true;
     } else {
+        res = FTP_FAILED;
         std::cerr << "Failed to download file: " << sanitizedRemotePath << std::endl;
     }
 
     curl_easy_cleanup(curl_download);
+
+    do{
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = taskProgress.find(proKey);
+        if(it != taskProgress.end())
+            taskProgress.erase(it);
+    }while(false);
+
     return res;
 }
 
 // 实现下载整个文件夹的函数-单线程
-bool FTPClient::downloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, const std::string& keyword) {
+bool FTPClient::downloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, std::vector<std::string> &filterKeywords)
+{
 
     std::string sanitizedRemotePath = remoteFolderPath;
     std::string sanitizedLocalPath = localFolderPath;
@@ -471,19 +521,20 @@ bool FTPClient::downloadFolder(const std::string& remoteFolderPath, const std::s
         return false;
     }
 
-    std::vector<std::string> fileNames = listRemoteFiles(sanitizedRemotePath);
-    for (const std::string& fileName : fileNames) {
-        std::string remoteFilePath = sanitizedRemotePath + "/" + fileName;
-        std::string localFilePath = sanitizedLocalPath + "/" + fileName;
+    std::vector<FTPFileInfo> files = listRemoteFiles(sanitizedRemotePath);
+    for (const FTPFileInfo& file : files) {
+        std::string remoteFilePath = file.path + file.fileName;
+        std::string localFilePath = sanitizedLocalPath + "/" + file.fileName;
 
-        downloadFile(remoteFilePath, localFilePath, keyword);
+        downloadFile(remoteFilePath, localFilePath, filterKeywords);
     }
 
     return true;
 }
 
 // 实现并发下载文件夹的函数
-bool FTPClient::concurrentDownloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, const std::string& keyword) {
+bool FTPClient::concurrentDownloadFolder(const std::string& remoteFolderPath, const std::string& localFolderPath, const std::vector<std::string> &filterKeywords)
+{
 
     std::string sanitizedRemotePath = remoteFolderPath;
     std::string sanitizedLocalPath = localFolderPath;
@@ -491,20 +542,21 @@ bool FTPClient::concurrentDownloadFolder(const std::string& remoteFolderPath, co
     sanitizePath(sanitizedRemotePath);
     sanitizePath(sanitizedLocalPath);
 
-    std::vector<std::string> fileNames = listRemoteFiles(sanitizedRemotePath);
-    std::vector<std::future<bool>> futures;
-    for (const std::string& fileName : fileNames) {
-        std::string remoteFilePath = sanitizedRemotePath + "/" + fileName;
-        std::string localFilePath = sanitizedLocalPath + "/" + fileName;
+    std::vector<FTPFileInfo> files = listRemoteFiles(sanitizedRemotePath);
+    std::vector<std::future<FTP_Code>> futures;
+    std::vector<std::thread> threads;
+    for (const FTPFileInfo& file : files) {
+        std::string remoteFilePath = file.path + file.fileName;
+        std::string localFilePath = sanitizedLocalPath + file.path + file.fileName;
 
         futures.emplace_back(std::async(std::launch::async, [=](){
-            return downloadFile(remoteFilePath, localFilePath, keyword);
+            return downloadFile(remoteFilePath, localFilePath, filterKeywords);
         }));
     }
 
     bool allSucceeded = true;
     for (auto& future : futures) {
-        if(!future.get())
+        if(future.get() != FTP_OK)
             allSucceeded = false;
     }
 
@@ -512,7 +564,8 @@ bool FTPClient::concurrentDownloadFolder(const std::string& remoteFolderPath, co
 }
 
 // 实现上传文件的函数
-bool FTPClient::uploadFile(const std::string& localFilePath, const std::string& remoteFilePath) {
+FTPClient::FTP_Code FTPClient::uploadFile(const std::string& localFilePath, const std::string& remoteFilePath)
+{
 
     std::string sanitizedRemotePath = remoteFilePath;
     std::string sanitizedLocalPath = localFilePath;
@@ -528,24 +581,24 @@ bool FTPClient::uploadFile(const std::string& localFilePath, const std::string& 
     std::ifstream file(sanitizedLocalPath, std::ios::in | std::ios::binary);
     if (!file.is_open()) {
         std::cerr << "Failed to open local file: " << sanitizedLocalPath << std::endl;
-        return false;
+        return LOCAL_FILE_OPEN_FAILED;
     }
 
     CURL* curlUpload = curl_easy_init();
     if (!curlUpload) {
-        return false;
+        return INITIALIZATION_FAILED;
     }
 
     curl_easy_setopt(curlUpload, CURLOPT_USERNAME, username_.c_str());
     curl_easy_setopt(curlUpload, CURLOPT_PASSWORD, password_.c_str());
 
-    long remoteFileSize = getRemoteFileSize(curlUpload, sanitizedRemotePath);
-    long localFileSize = getLocalFileSize(sanitizedLocalPath);
+    size_t remoteFileSize = getRemoteFileSize(curlUpload, sanitizedRemotePath);
+    size_t localFileSize = getLocalFileSize(sanitizedLocalPath);
 
     if (localFileSize <= remoteFileSize) {
         std::cout << "Local file size is the same as remote file size. No need to upload." << std::endl;
         curl_easy_cleanup(curlUpload);
-        return true;
+        return REMOTE_AND_LOCAL_FILE_IDENTICAL;
     }
 
     // 设置偏移量，断点续传
@@ -559,12 +612,16 @@ bool FTPClient::uploadFile(const std::string& localFilePath, const std::string& 
 
     // 设置CURLOPT_NOPROGRESS为0，以启用进度回调函数
     // 设置CURLOPT_PROGRESSFUNCTION为progressCallback函数指针，用于获取上传进度
-    FileTransferInfo fileInfo;
-    fileInfo.filename = sanitizedLocalPath;
-    fileInfo.totalSize = localFileSize;
-    fileInfo.transferType = Upload;
+    long proKey = taskProgress.size();
+    do{
+        std::lock_guard<std::mutex> lock(mutex);
+        taskProgress[proKey] = FileTransferInfo();
+    }while(false);
+    taskProgress[proKey].filename = sanitizedLocalPath;
+    taskProgress[proKey].totalSize = localFileSize;
+    taskProgress[proKey].transferType = Upload;
 
-    curl_easy_setopt(curlUpload, CURLOPT_PROGRESSDATA, &fileInfo);
+    curl_easy_setopt(curlUpload, CURLOPT_PROGRESSDATA, &taskProgress[proKey]);
     curl_easy_setopt(curlUpload,CURLOPT_PROGRESSFUNCTION , progressCallback);
     curl_easy_setopt(curlUpload,CURLOPT_NOPROGRESS , 0L);
 
@@ -572,15 +629,24 @@ bool FTPClient::uploadFile(const std::string& localFilePath, const std::string& 
 
     file.close();
 
-    bool res = false;
+    FTP_Code res = FTP_OK;
     if (result == CURLE_OK) {
         std::cout << "File uploaded successfully!" << std::endl;
-        res = true;
+        res = FTP_OK;
     } else {
+        res = FTP_FAILED;
         std::cerr << "Failed to upload file: " << sanitizedLocalPath << std::endl;
     }
 
     curl_easy_cleanup(curlUpload);
+
+    do{
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = taskProgress.find(proKey);
+        if(it != taskProgress.end())
+            taskProgress.erase(it);
+    }while(false);
+
     return res;
 }
 
@@ -615,7 +681,7 @@ bool FTPClient::concurrentUploadFolder(const std::string &localFolderPath, const
     sanitizePath(sanitizedRemotePath);
     sanitizePath(sanitizedLocalPath);
 
-    std::vector<std::future<bool>> futures;
+    std::vector<std::future<FTP_Code>> futures;
     std::vector<std::string> fileNames = listLocalFiles(sanitizedLocalPath);
     for (std::string fileName : fileNames) {
         sanitizePath(fileName);
@@ -630,7 +696,7 @@ bool FTPClient::concurrentUploadFolder(const std::string &localFolderPath, const
 
     bool allSucceeded = true;
     for (auto& future : futures) {
-        if(!future.get())
+        if(future.get() != FTP_OK)
             allSucceeded = false;
     }
 
